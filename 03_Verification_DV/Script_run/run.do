@@ -12,7 +12,6 @@ vlog -sv tb_sram.sv
 
 vsim -voptargs=+acc work.tb_sram
 
-# Them cac tin hieu giao tiep quan trong cua SRAM
 add wave -noupdate sim:/tb_sram/clk
 add wave -noupdate sim:/tb_sram/cs
 add wave -noupdate sim:/tb_sram/we
