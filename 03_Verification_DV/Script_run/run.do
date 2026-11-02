@@ -1,24 +1,25 @@
-
 transcript on
 transcript file sim.log
 
 if {[file exists work]} {
     vdel -lib work -all
 }
-
 vlib work
-vlog sram_model_stub.v
-vlog -sv tb_sram.sv
 
-vsim -voptargs=+acc work.tb_sram
+vlog ../Sram_model/sram_1rw.v
+vlog -sv ../testbench/tb_sram.sv
 
-add wave -noupdate sim:/tb_sram/clk
-add wave -noupdate sim:/tb_sram/cs
-add wave -noupdate sim:/tb_sram/we
-add wave -noupdate -radix hex sim:/tb_sram/addr
-add wave -noupdate -radix hex sim:/tb_sram/din
-add wave -noupdate -radix hex sim:/tb_sram/dout
+# Đổi work.tb_sram thành work.tb_sram_1rw
+vsim -voptargs=+acc work.tb_sram_1rw
+
+# Cập nhật tên module cho các đường sóng dạng sóng
+add wave -noupdate sim:/tb_sram_1rw/clk
+add wave -noupdate sim:/tb_sram_1rw/cs
+add wave -noupdate sim:/tb_sram_1rw/we
+add wave -noupdate -radix hex sim:/tb_sram_1rw/addr
+add wave -noupdate -radix hex sim:/tb_sram_1rw/din
+add wave -noupdate -radix hex sim:/tb_sram_1rw/dout
+add wave -noupdate -radix dec sim:/tb_sram_1rw/errors
 
 run -all
-
 transcript file ""
