@@ -214,5 +214,3 @@ module mbist_controller #(
 `endif
 
 endmodule
-
-endmodule
