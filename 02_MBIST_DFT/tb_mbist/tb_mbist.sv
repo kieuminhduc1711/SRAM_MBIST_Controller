@@ -36,7 +36,10 @@ module tb_mbist;
     );
 
     // 2. Ket noi voi mo hinh SRAM (Sram_model_stub)
-    Sram_model_stub u_sram (
+    sram_1rw #(
+        .ADDR_WIDTH(ADDR_WIDTH),
+        .DATA_WIDTH(DATA_WIDTH)
+    ) u_sram (
         .clk  (clk),
         .cs   (mbist_cs),
         .we   (mbist_we),
