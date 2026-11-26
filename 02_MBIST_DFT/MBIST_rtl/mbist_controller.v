@@ -4,6 +4,7 @@
 // Spec   : SRAM-SPEC-001 (1RW Synchronous SRAM 256x8)
 // ============================================================================
 
+
 module mbist_controller #(
     parameter ADDR_WIDTH = 8,
     parameter DATA_WIDTH = 8
@@ -11,109 +12,145 @@ module mbist_controller #(
     input  wire                  clk,
     input  wire                  rst_n,
     input  wire                  test_start,
-    
-    // Tín hiệu giao tiếp với cổng SRAM
-    output reg                   mbist_cs,
-    output reg                   mbist_we,
-    output reg  [ADDR_WIDTH-1:0] mbist_addr,
-    output reg  [DATA_WIDTH-1:0] mbist_din,
+
+    // Giao tiep voi SRAM
+    output wire                  mbist_cs,
+    output wire                  mbist_we,
+    output wire [ADDR_WIDTH-1:0] mbist_addr,
+    output wire [DATA_WIDTH-1:0] mbist_din,
     input  wire [DATA_WIDTH-1:0] sram_dout,
-    
-    // Tín hiệu báo trạng thái kiểm tra
-    output reg                   test_done,
+
+    // Trang thai
+    output wire                  test_done,
     output reg                   test_fail
 );
 
-    // Dinh nghia cac trang thai FSM cho thuat toan March C-
+    localparam [ADDR_WIDTH-1:0] A_MAX = {ADDR_WIDTH{1'b1}};
+    localparam [ADDR_WIDTH-1:0] A_MIN = {ADDR_WIDTH{1'b0}};
+    localparam [DATA_WIDTH-1:0] D0    = {DATA_WIDTH{1'b0}};
+    localparam [DATA_WIDTH-1:0] D1    = {DATA_WIDTH{1'b1}};
+
     localparam [3:0]
         ST_IDLE   = 4'd0,
-        ST_M0_W0  = 4'd1,   // M0: v (w0)   - Khoi tao toan bo o nho ve 0
-        ST_M1_R0  = 4'd2,   // M1: ^ (r0)   - Doc kiem tra 0
-        ST_M1_W1  = 4'd3,   // M1: ^ (w1)   - Ghi de 1, sau do tang dia chi
-        ST_M2_R1  = 4'd4,   // M2: ^ (r1)   - Doc kiem tra 1
-        ST_M2_W0  = 4'd5,   // M2: ^ (w0)   - Ghi de 0, sau do tang dia chi
-        ST_M3_R0  = 4'd6,   // M3: v (r0)   - Doc kiem tra 0 (dia chi giam)
-        ST_M3_W1  = 4'd7,   // M3: v (w1)   - Ghi de 1, sau do giam dia chi
-        ST_M4_R1  = 4'd8,   // M4: v (r1)   - Doc kiem tra 1 (dia chi giam)
-        ST_M4_W0  = 4'd9,   // M4: v (w0)   - Ghi de 0, sau do giam dia chi
-        ST_M5_R0  = 4'd10,  // M5: v (r0)   - Doc kiem tra 0 toan bo bo nho
-        ST_M5_CHK = 4'd11,  // M5: Cho chu ky cuoi de so sanh dia chi 255
-        ST_DONE   = 4'd12;  // Hoan thanh
+        ST_M0_W0  = 4'd1,   // M0: any  (w0)
+        ST_M1_R0  = 4'd2,   // M1: up   (r0)
+        ST_M1_W1  = 4'd3,   // M1: up   (w1)
+        ST_M2_R1  = 4'd4,   // M2: up   (r1)
+        ST_M2_W0  = 4'd5,   // M2: up   (w0)
+        ST_M3_R0  = 4'd6,   // M3: down (r0)
+        ST_M3_W1  = 4'd7,   // M3: down (w1)
+        ST_M4_R1  = 4'd8,   // M4: down (r1)
+        ST_M4_W0  = 4'd9,   // M4: down (w0)
+        ST_M5_R0  = 4'd10,  // M5: any  (r0)
+        ST_M5_CHK = 4'd11,  // cho so sanh lan doc cuoi
+        ST_DONE   = 4'd12;
 
-    reg [3:0] current_state, next_state;
+    reg [3:0]            state, next_state;
+    reg [ADDR_WIDTH-1:0] addr_q, addr_n;
 
-    // Thanh ghi kiem tra tre 1 chu ky (Registered Read Latency = 1)
-    reg                  exp_valid_d1;
-    reg [DATA_WIDTH-1:0] exp_data_d1;
-
-    // ------------------------------------------------------------------------
-    // 1. Chuyen trang thai FSM (Tuan tu)
-    // ------------------------------------------------------------------------
-    always @(posedge clk or negedge rst_n) begin
-        if (!rst_n)
-            current_state <= ST_IDLE;
-        else
-            current_state <= next_state;
-    end
+    // Thanh ghi kiem tra tre 1 chu ky (khop read latency cua SRAM)
+    reg                  exp_valid_q;
+    reg [DATA_WIDTH-1:0] exp_data_q;
 
     // ------------------------------------------------------------------------
-    // 2. Logic chuyen trang thai tiep theo (To hop)
+    // Giai ma trang thai -> tin hieu dieu khien
+    // ------------------------------------------------------------------------
+    wire st_write = (state == ST_M0_W0) || (state == ST_M1_W1) ||
+                    (state == ST_M2_W0) || (state == ST_M3_W1) ||
+                    (state == ST_M4_W0);
+
+    wire st_read  = (state == ST_M1_R0) || (state == ST_M2_R1) ||
+                    (state == ST_M3_R0) || (state == ST_M4_R1) ||
+                    (state == ST_M5_R0);
+
+    assign mbist_cs   = st_write | st_read;
+    assign mbist_we   = st_write;
+    assign mbist_addr = addr_q;
+    assign mbist_din  = ((state == ST_M1_W1) || (state == ST_M3_W1)) ? D1 : D0;
+
+    // Gia tri ky vong cua phep doc dang phat ra
+    wire [DATA_WIDTH-1:0] exp_data_now =
+        ((state == ST_M2_R1) || (state == ST_M4_R1)) ? D1 : D0;
+
+    assign test_done = (state == ST_DONE);
+
+    // ------------------------------------------------------------------------
+    // Next-state va next-address (to hop)
     // ------------------------------------------------------------------------
     always @(*) begin
-        next_state = current_state;
-        case (current_state)
+        next_state = state;
+        addr_n     = addr_q;
+        case (state)
             ST_IDLE: begin
+                addr_n = A_MIN;
                 if (test_start)
                     next_state = ST_M0_W0;
             end
 
-            // M0: Ghi 0 tu dia chi 0 -> 255
+            // M0: ghi 0 tu 0 -> max
             ST_M0_W0: begin
-                if (mbist_addr == 8'hFF)
+                if (addr_q == A_MAX) begin
                     next_state = ST_M1_R0;
+                    addr_n     = A_MIN;
+                end else
+                    addr_n = addr_q + 1'b1;
             end
 
-            // M1: Tang dan (Doc 0 roi Ghi 1 tai cung dia chi)
+            // M1: tang dan (r0, w1)
             ST_M1_R0: next_state = ST_M1_W1;
             ST_M1_W1: begin
-                if (mbist_addr == 8'hFF)
+                if (addr_q == A_MAX) begin
                     next_state = ST_M2_R1;
-                else
+                    addr_n     = A_MIN;
+                end else begin
                     next_state = ST_M1_R0;
+                    addr_n     = addr_q + 1'b1;
+                end
             end
 
-            // M2: Tang dan (Doc 1 roi Ghi 0 tai cung dia chi)
+            // M2: tang dan (r1, w0)
             ST_M2_R1: next_state = ST_M2_W0;
             ST_M2_W0: begin
-                if (mbist_addr == 8'hFF)
-                    next_state = ST_M3_R0; // Chuyen sang pha giam dan tu 255
-                else
+                if (addr_q == A_MAX)
+                    next_state = ST_M3_R0;      // giu addr = max, bat dau giam
+                else begin
                     next_state = ST_M2_R1;
+                    addr_n     = addr_q + 1'b1;
+                end
             end
 
-            // M3: Giam dan (Doc 0 roi Ghi 1 tai cung dia chi)
+            // M3: giam dan (r0, w1)
             ST_M3_R0: next_state = ST_M3_W1;
             ST_M3_W1: begin
-                if (mbist_addr == 8'h00)
+                if (addr_q == A_MIN) begin
                     next_state = ST_M4_R1;
-                else
+                    addr_n     = A_MAX;         // M4 cung giam, bat dau tu max
+                end else begin
                     next_state = ST_M3_R0;
+                    addr_n     = addr_q - 1'b1;
+                end
             end
 
-            // M4: Giam dan (Doc 1 roi Ghi 0 tai cung dia chi)
+            // M4: giam dan (r1, w0)
             ST_M4_R1: next_state = ST_M4_W0;
             ST_M4_W0: begin
-                if (mbist_addr == 8'h00)
+                if (addr_q == A_MIN) begin
                     next_state = ST_M5_R0;
-                else
+                    addr_n     = A_MIN;         // M5 tang tu 0
+                end else begin
                     next_state = ST_M4_R1;
+                    addr_n     = addr_q - 1'b1;
+                end
             end
 
-            // M5: Doc 0 toan bo tu 0 -> 255
+            // M5: doc 0 toan bo, tang dan
             ST_M5_R0: begin
-                if (mbist_addr == 8'hFF)
+                if (addr_q == A_MAX)
                     next_state = ST_M5_CHK;
+                else
+                    addr_n = addr_q + 1'b1;
             end
+
             ST_M5_CHK: next_state = ST_DONE;
 
             ST_DONE: begin
@@ -126,160 +163,38 @@ module mbist_controller #(
     end
 
     // ------------------------------------------------------------------------
-    // 3. Logic dieu khien SRAM & Phat sinh dia chi / du lieu
+    // Thanh ghi: state, dia chi, pipeline ky vong, co FAIL
     // ------------------------------------------------------------------------
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            mbist_cs     <= 1'b0;
-            mbist_we     <= 1'b0;
-            mbist_addr   <= {ADDR_WIDTH{1'b0}};
-            mbist_din    <= {DATA_WIDTH{1'b0}};
-            test_done    <= 1'b0;
-            exp_valid_d1 <= 1'b0;
-            exp_data_d1  <= {DATA_WIDTH{1'b0}};
+            state       <= ST_IDLE;
+            addr_q      <= A_MIN;
+            exp_valid_q <= 1'b0;
+            exp_data_q  <= D0;
+            test_fail   <= 1'b0;
         end else begin
-            case (current_state)
-                ST_IDLE: begin
-                    mbist_cs     <= 1'b0;
-                    mbist_we     <= 1'b0;
-                    mbist_addr   <= 8'h00;
-                    mbist_din    <= 8'h00;
-                    test_done    <= 1'b0;
-                    exp_valid_d1 <= 1'b0;
-                end
+            state       <= next_state;
+            addr_q      <= addr_n;
+            exp_valid_q <= st_read;
+            exp_data_q  <= exp_data_now;
 
-                // M0: Khoi tao ghi 0x00 vao toan bo SRAM
-                ST_M0_W0: begin
-                    mbist_cs     <= 1'b1;
-                    mbist_we     <= 1'b1; // Write
-                    mbist_din    <= 8'h00;
-                    exp_valid_d1 <= 1'b0;
-                    if (mbist_addr == 8'hFF)
-                        mbist_addr <= 8'h00; // Reset ve 0 chuan bi cho M1
-                    else
-                        mbist_addr <= mbist_addr + 1'b1;
-                end
-
-                // M1: Doc 0x00
-                ST_M1_R0: begin
-                    mbist_cs     <= 1'b1;
-                    mbist_we     <= 1'b0; // Read
-                    exp_valid_d1 <= 1'b1;
-                    exp_data_d1  <= 8'h00; // Ky vong doc duoc 0x00
-                end
-                // M1: Ghi 0xFF tai cung dia chi
-                ST_M1_W1: begin
-                    mbist_cs     <= 1'b1;
-                    mbist_we     <= 1'b1; // Write
-                    mbist_din    <= 8'hFF;
-                    exp_valid_d1 <= 1'b0;
-                    if (mbist_addr == 8'hFF)
-                        mbist_addr <= 8'h00; // Chuan bi cho M2
-                    else
-                        mbist_addr <= mbist_addr + 1'b1;
-                end
-
-                // M2: Doc 0xFF
-                ST_M2_R1: begin
-                    mbist_cs     <= 1'b1;
-                    mbist_we     <= 1'b0; // Read
-                    exp_valid_d1 <= 1'b1;
-                    exp_data_d1  <= 8'hFF; // Ky vong doc duoc 0xFF
-                end
-                // M2: Ghi 0x00 tai cung dia chi
-                ST_M2_W0: begin
-                    mbist_cs     <= 1'b1;
-                    mbist_we     <= 1'b1; // Write
-                    mbist_din    <= 8'h00;
-                    exp_valid_d1 <= 1'b0;
-                    if (mbist_addr == 8'hFF)
-                        mbist_addr <= 8'hFF; // Giu nguyen 255 de bat dau dem giam o M3
-                    else
-                        mbist_addr <= mbist_addr + 1'b1;
-                end
-
-                // M3: Doc 0x00 (Giam dan)
-                ST_M3_R0: begin
-                    mbist_cs     <= 1'b1;
-                    mbist_we     <= 1'b0; // Read
-                    exp_valid_d1 <= 1'b1;
-                    exp_data_d1  <= 8'h00;
-                end
-                // M3: Ghi 0xFF (Giam dan)
-                ST_M3_W1: begin
-                    mbist_cs     <= 1'b1;
-                    mbist_we     <= 1'b1; // Write
-                    mbist_din    <= 8'hFF;
-                    exp_valid_d1 <= 1'b0;
-                    if (mbist_addr == 8'h00)
-                        mbist_addr <= 8'hFF; // Reset ve 255 de bat dau dem giam o M4
-                    else
-                        mbist_addr <= mbist_addr - 1'b1;
-                end
-
-                // M4: Doc 0xFF (Giam dan)
-                ST_M4_R1: begin
-                    mbist_cs     <= 1'b1;
-                    mbist_we     <= 1'b0; // Read
-                    exp_valid_d1 <= 1'b1;
-                    exp_data_d1  <= 8'hFF;
-                end
-                // M4: Ghi 0x00 (Giam dan)
-                ST_M4_W0: begin
-                    mbist_cs     <= 1'b1;
-                    mbist_we     <= 1'b1; // Write
-                    mbist_din    <= 8'h00;
-                    exp_valid_d1 <= 1'b0;
-                    if (mbist_addr == 8'h00)
-                        mbist_addr <= 8'h00; // Reset ve 0 de bat dau M5
-                    else
-                        mbist_addr <= mbist_addr - 1'b1;
-                end
-
-                // M5: Doc 0x00 lan cuoi
-                ST_M5_R0: begin
-                    mbist_cs     <= 1'b1;
-                    mbist_we     <= 1'b0; // Read
-                    exp_valid_d1 <= 1'b1;
-                    exp_data_d1  <= 8'h00;
-                    if (mbist_addr != 8'hFF)
-                        mbist_addr <= mbist_addr + 1'b1;
-                end
-                ST_M5_CHK: begin
-                    mbist_cs     <= 1'b0; // Nghi
-                    exp_valid_d1 <= 1'b0;
-                end
-
-                // DONE: Hoan thanh
-                ST_DONE: begin
-                    mbist_cs     <= 1'b0;
-                    mbist_we     <= 1'b0;
-                    test_done    <= 1'b1;
-                    exp_valid_d1 <= 1'b0;
-                end
-            endcase
-        end
-    end
-
-    // ------------------------------------------------------------------------
-    // 4. Bo so sanh (Comparator) & Co loi (Sticky Fail Flag)
-    // ------------------------------------------------------------------------
-    always @(posedge clk or negedge rst_n) begin
-        if (!rst_n) begin
-            test_fail <= 1'b0;
-        end else if (current_state == ST_IDLE && test_start) begin
-            test_fail <= 1'b0; // Xoa co khi bat dau dot test moi
-        end else if (exp_valid_d1) begin
-            if (sram_dout !== exp_data_d1) begin
-                test_fail <= 1'b1; // Chi can 1 bit loi la chot luon co FAIL
+            if (state == ST_IDLE && test_start) begin
+                test_fail <= 1'b0;                  // bat dau dot test moi
+            end else if (exp_valid_q) begin
+                // Neu sram_dout la X thi phep == cho X -> nhanh else -> bao FAIL
+                if (sram_dout == exp_data_q)
+                    test_fail <= test_fail;
+                else
+                    test_fail <= 1'b1;              // sticky
             end
         end
     end
 
-    // Ho tro hien thi ten trang thai tren Waveform ModelSim
+`ifndef SYNTHESIS
+    // Hien thi ten trang thai tren waveform
     reg [79:0] state_name;
     always @(*) begin
-        case (current_state)
+        case (state)
             ST_IDLE   : state_name = "IDLE";
             ST_M0_W0  : state_name = "M0_w0";
             ST_M1_R0  : state_name = "M1_r0";
@@ -296,5 +211,8 @@ module mbist_controller #(
             default   : state_name = "UNKNOWN";
         endcase
     end
+`endif
+
+endmodule
 
 endmodule
