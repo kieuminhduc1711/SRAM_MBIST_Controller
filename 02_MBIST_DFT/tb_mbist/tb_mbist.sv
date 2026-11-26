@@ -67,10 +67,10 @@ module tb_mbist;
         #20;
 
         // Phat xung test_start
-        @(posedge clk);
-        test_start = 1;
-        @(posedge clk);
-        test_start = 0;
+        @(negedge clk);
+        test_start = 1'b1;
+        @(negedge clk);
+        test_start = 1'b0;
 
         // Cho MBIST chay thuat toan March C- cho den khi test_done = 1
         @(posedge test_done);
