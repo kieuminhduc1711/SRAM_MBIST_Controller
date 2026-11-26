@@ -6,7 +6,7 @@ vlib work
 vlog ../../01_RTL_Design/sram_1rw.v
 vlog ../MBIST_rtl/mbist_controller.v
 vlog ../MBIST_rtl/sram_mbist_top.v
-vlog -sv ../tb_top/tb_top.sv
+vlog -sv ../tb_mbist/tb_top.sv
 
 vsim -voptargs=+acc work.tb_top
 
