@@ -6,8 +6,8 @@ if {[file exists work]} {
 }
 vlib work
 
-vlog ../Sram_model/sram_1rw.v
-vlog -sv ../testbench/tb_sram.sv
+vlog ../../01_RTL_Design/sram_1rw.v
+vlog -sv ../tb_sram/tb_sram.sv
 
 # Đổi work.tb_sram thành work.tb_sram_1rw
 vsim -voptargs=+acc work.tb_sram_1rw
