@@ -2,7 +2,7 @@ transcript on
 vlib work
 
 # 1. Biên dịch: Lấy mô hình SRAM của bạn DV, MBIST của bạn, và Testbench
-vlog ../../03_Verification_DV/Sram_model/Sram_model_stub.v
+vlog ../../01_RTL_Design/sram_1rw.v
 vlog ../MBIST_rtl/mbist_controller.v
 vlog -sv ../tb_mbist/tb_mbist.sv
 
